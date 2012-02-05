@@ -1,0 +1,171 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature 'say';
+
+use Path::Class qw(dir);
+use Encode qw(encode decode);
+use IO::File;
+use IO::Uncompress::Gunzip;
+
+my $file_encoding = 'iso-8859-1';
+my $term_encoding = 'utf-8';
+
+my ($user, $channel, $date) = @ARGV;
+
+# Find ZNC user dirs
+my $znc_user_dir = dir($ENV{'HOME'}, '.znc', 'users');
+my @znc_user_dirs = $znc_user_dir->children();
+my @znc_users = map { "" . $_->relative($znc_user_dir) } @znc_user_dirs;
+
+# List valid users unless param matches
+die("Please specify a valid user to search:\n" . join("\n", map { to_terminal($_) } @znc_users) . "\n")
+    unless $user ~~ @znc_users;
+
+# Find valid log files for user
+my $log_dir = $znc_user_dir->subdir($user, "moddata", "log");
+my @log_files = $log_dir->children();
+
+# List valid channels unless param matches
+unless ( $channel ) {
+    die("Please specify a valid channel to search:\n"
+      . join("\n", map { to_terminal($_) } filter_channel_names($log_dir) )
+      . "\n"
+    );
+}
+
+# Show filenames that match channel and date
+say join("\n",
+    map { render_log_file($_) }
+    filter_filenames($log_dir, $channel, $date)
+);
+
+exit;
+
+# Filter valid channel names based on log dir
+sub filter_channel_names {
+    my ($log_dir) = @_;
+    my %channel_map;
+    while ( my $file = $log_dir->next() ) {
+        next unless -f $file;
+        next unless -r $file;
+        # Check syntax of filename
+        if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
+            my $channel = $1;
+            my $date = $2;
+            $channel_map{$channel}++;
+        }
+        else {
+            say STDERR "File not matching pattern: $file";
+        }
+    }
+    return sort keys %channel_map;
+}
+
+# Filter valid dates based on log dir and channel name
+sub filter_channel_dates {
+    my ($log_dir, $channel_requested) = @_;
+    my $channel_requested_utf8 = decode($term_encoding, $channel_requested);
+    my %date_map;
+    while ( my $file = $log_dir->next() ) {
+        next unless -f $file;
+        next unless -r $file;
+        # Check syntax of filename
+        if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
+            my $channel = $1;
+            my $date = $2;
+            my $channel_utf8 = decode($file_encoding, $channel);
+            next unless $channel_utf8 =~ qr/\Q$channel_requested_utf8\E/i;
+            $date_map{$date}++;
+        }
+        else {
+            say STDERR "File not matching pattern: $file";
+        }
+    }
+    return sort keys %date_map;
+}
+
+# Filter filenames based on log dir, channel name and date
+# Returns array with metadata
+sub filter_filenames {
+    my ($log_dir, $channel_requested, $date_requested) = @_;
+    my $channel_requested_utf8 = decode($term_encoding, $channel_requested);
+    my @filenames;
+    while ( my $file = $log_dir->next() ) {
+        next unless -f $file;
+        next unless -r $file;
+        # Check syntax of filename
+        if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(\.gz)?$/ ) {
+            my $channel = $1;
+            my $date = $2;
+            my $compressed = $3 ? 1 : 0;
+            my $channel_utf8 = decode($file_encoding, $channel);
+            next unless $channel_utf8 =~ qr/\Q$channel_requested_utf8\E/i;
+            if ( $date_requested ) {
+                next unless $date =~ qr/^\Q$date_requested\E/;
+            }
+            push @filenames, {
+                'channel'    => $channel,
+                'date'       => $date,
+                'compressed' => $compressed,
+                'file'       => $file,
+            };
+        }
+        else {
+            say STDERR "File not matching pattern: $file";
+        }
+    }
+    return sort { $a->{'date'} cmp $b->{'date'} }
+           sort { $a->{'channel'} cmp $b->{'channel'} }
+           @filenames;
+}
+
+# Convert binary input in $file_encoding to binary output $term_encoding
+sub to_terminal {
+    my ($str, $input_encoding) = @_;
+    $input_encoding ||= $file_encoding;
+    return encode( $term_encoding, decode( $input_encoding, $str ) );
+}
+
+# Render contents of log file with date and channel name prefixed
+# Returns array of log lines
+sub render_log_file {
+    my ($entry) = @_;
+    my $file = $entry->{'file'};
+    my $channel = $entry->{'channel'};
+    my $date = $entry->{'date'};
+    my $compressed = $entry->{'compressed'};
+    return "" unless -r $file;
+    my $fh = $file->openr();
+    if ( $compressed ) {
+        $fh = IO::Uncompress::Gunzip->new($fh, AutoClose => 1);
+    }
+    my @log_lines;
+    while( my $line = <$fh> ) {
+        chomp $line;
+        next if $line =~ /\Q***\E (?:Quits|Joins|Parts):/;
+        next if $line =~ /\Q***\E .* (?:sets mode|is now known as)/;
+
+        # Generate proper timestamp from line + date
+        my $timestamp = $date;
+        if ( $line =~ s/^ \[ (\d{2}) : (\d{2}) : (\d{2}) \] (.*) $/$4/x ) {
+            $timestamp = $date . "-" . $1 . $2 . $3;
+        }
+
+        # Get rid of whitespace at start and end of line
+        $line =~ s/^\s*(.*?)\s*$/$1/;
+
+        # Decode channel name
+        my $channel_utf8 = decode($file_encoding, $channel);
+
+        # First try to decode as UTF8 strict, then try file encoding if it failed
+        my $line_utf8 = "";
+        eval { $line_utf8 = decode('utf-8', $line, Encode::FB_CROAK); };
+        $line_utf8 = decode($file_encoding, $line) if $@;
+
+        my $log_line = encode($term_encoding, "$timestamp $channel_utf8: $line_utf8" );
+        push @log_lines, $log_line;
+    }
+    return @log_lines;
+}
