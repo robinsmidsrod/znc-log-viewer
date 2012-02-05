@@ -19,6 +19,11 @@ FreeNode, I type this:
 
     znc-log-viewer freenode perl6 201201
 
+SEE ALSO
+========
+
+* The ZNC log module - http://wiki.znc.in/Log
+
 LICENSE
 =======
 
