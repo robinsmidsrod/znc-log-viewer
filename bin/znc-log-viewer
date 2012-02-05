@@ -37,6 +37,9 @@ unless ( $channel ) {
 
 # Show filenames that match channel and date
 say join("\n",
+    map { encode($term_encoding, $_) }
+    map { $_->{'timestamp'} . " " . $_->{'channel'} . ": " . $_->{'message'} }
+    sort { $a->{'timestamp'} cmp $b->{'timestamp'} }
     map { render_log_file($_) }
     filter_filenames($log_dir, $channel, $date)
 );
@@ -164,8 +167,11 @@ sub render_log_file {
         eval { $line_utf8 = decode('utf-8', $line, Encode::FB_CROAK); };
         $line_utf8 = decode($file_encoding, $line) if $@;
 
-        my $log_line = encode($term_encoding, "$timestamp $channel_utf8: $line_utf8" );
-        push @log_lines, $log_line;
+        push @log_lines, {
+            timestamp => $timestamp,
+            channel   => $channel_utf8,
+            message   => $line_utf8,
+        };
     }
     return @log_lines;
 }
