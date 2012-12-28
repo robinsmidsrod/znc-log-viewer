@@ -14,26 +14,29 @@ my $term_encoding = 'utf-8';
 
 my ($user, $channel, $date) = @ARGV;
 
-# Find ZNC user dirs
-my $znc_user_dir = dir($ENV{'HOME'}, '.znc', 'users');
-my @znc_user_dirs = $znc_user_dir->children();
-my @znc_users = map { "" . $_->relative($znc_user_dir) } @znc_user_dirs;
+my $znc_user_dir = get_znc_user_dir();
+my $znc_user_map = get_znc_user_map($znc_user_dir);
 
 # List valid users unless param matches
-die("Please specify a valid user to search:\n" . join("\n", map { to_terminal($_) } @znc_users) . "\n")
-    unless $user ~~ @znc_users;
+die(
+    "Please specify a valid user to search:\n"
+  . join("\n", map { to_terminal($_) } sort keys %$znc_user_map)
+  . "\n"
+) unless $user and exists $znc_user_map->{$user};
 
-# Find valid log files for user
-my $log_dir = $znc_user_dir->subdir($user, "moddata", "log");
-my @log_files = $log_dir->children();
+# Find valid channels and their associated log files for user
+my $channel_map = get_channel_map( $znc_user_map->{$user} );
 
 # List valid channels unless param matches
-unless ( $channel ) {
-    die("Please specify a valid channel to search:\n"
-      . join("\n", map { to_terminal($_) } filter_channel_names($log_dir) )
-      . "\n"
-    );
-}
+die(
+    "Please specify a valid channel to search:\n"
+  . join("\n",
+      map { to_terminal($_) }
+      map { $_ . " (" . scalar @{ $channel_map->{$_} } . ")" }
+      sort keys %$channel_map
+    )
+  . "\n"
+) unless $channel;
 
 # Show filenames that match channel and date
 say join("\n",
@@ -41,29 +44,50 @@ say join("\n",
     map { $_->{'timestamp'} . " " . $_->{'channel'} . ": " . $_->{'message'} }
     sort { $a->{'timestamp'} cmp $b->{'timestamp'} }
     map { render_log_file($_) }
-    filter_filenames($log_dir, $channel, $date)
+    filter_filenames( $znc_user_map->{$user}, $channel, $date )
 );
 
 exit;
 
-# Filter valid channel names based on log dir
-sub filter_channel_names {
+# Specify which dir contains our ZNC user dirs
+sub get_znc_user_dir {
+    return dir($ENV{'HOME'}, '.znc', 'users');
+}
+
+# Create a map of ZNC users and associated log dirs
+sub get_znc_user_map {
+    my ($znc_user_dir) = @_;
+    my %znc_user_map =
+        map {
+            "" . $_->relative($znc_user_dir)
+              =>
+            $_->subdir("moddata","log")
+        }
+        $znc_user_dir->children();
+    return wantarray ? %znc_user_map : \%znc_user_map;
+}
+
+# Create a map of all valid channels for user based on log dir
+# Key: channel name
+# Value: array of logfiles (unsorted)
+sub get_channel_map {
     my ($log_dir) = @_;
     my %channel_map;
     while ( my $file = $log_dir->next() ) {
         next unless -f $file;
-        next unless -r $file;
+        next unless -r _;
         # Check syntax of filename
         if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
             my $channel = $1;
             my $date = $2;
-            $channel_map{$channel}++;
+            $channel_map{$channel} = [] unless exists $channel_map{$channel};
+            push @{ $channel_map{$channel} }, $file;
         }
         else {
             say STDERR "File not matching pattern: $file";
         }
     }
-    return sort keys %channel_map;
+    return wantarray ? %channel_map : \%channel_map;
 }
 
 # Filter valid dates based on log dir and channel name
