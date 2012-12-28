@@ -42,14 +42,22 @@ die(
 die("No channels found for search '$channel'.\n")
     unless scalar keys %$channel_map;
 
-# Show filenames that match channel and date
-say join("\n",
-    map { encode($term_encoding, $_) }
-    map { $_->{'timestamp'} . " " . $_->{'channel'} . ": " . $_->{'message'} }
-    sort { $a->{'timestamp'} cmp $b->{'timestamp'} }
-    map { render_log_file($_) }
-    filter_filenames( $znc_user_map->{$user}, $channel_map, $date )
-);
+# Show filenames that match channel and date (oldest first)
+my @date_clusters = cluster_filenames( $channel_map, $date );
+while ( my $date_cluster = shift @date_clusters ) {
+    # Chunk up all events for the day for all matched channels
+    my @events;
+    while ( my $log_file = shift @$date_cluster ) {
+        push @events, render_log_file($log_file);
+    }
+    # No need to print empty dates, right?
+    next unless @events;
+    # Output all messages, oldest first, channels intermixed
+    print map { encode($term_encoding, $_) }
+          map { $_->{'timestamp'} . " " . $_->{'channel'} . ": " . $_->{'message'} . "\n" }
+          sort { $a->{'timestamp'} cmp $b->{'timestamp'} }
+          @events;
+}
 
 exit;
 
@@ -105,14 +113,15 @@ sub get_channel_map {
     return wantarray ? %channel_map : \%channel_map;
 }
 
-# Filter and sort log files based on date
-# Returns array with metadata
-sub filter_filenames {
+# Cluster logfiles on logged date
+# Filter away files not matching specified date
+# Returns list of arrayref with hashrefs of logfile metadata
+sub cluster_filenames {
     my ($channel_map, $date_requested) = @_;
     my $re_date_req = defined($date_requested)
                     ? qr/^\Q$date_requested\E/
                     : undef;
-    my @filenames;
+    my %date_map;
     foreach my $channel ( keys %$channel_map ) {
         foreach my $file ( @{ $channel_map->{$channel} } ) {
             # Check syntax of filename
@@ -122,7 +131,8 @@ sub filter_filenames {
                 if ( defined $date_requested ) {
                     next unless $date =~ m/$re_date_req/;
                 }
-                push @filenames, {
+                $date_map{$date} = [] unless exists $date_map{$date};
+                push @{ $date_map{$date} }, {
                     'channel'    => $channel,
                     'date'       => $date,
                     'file'       => $file,
@@ -133,9 +143,10 @@ sub filter_filenames {
             }
         }
     }
-    return sort { $a->{'date'} cmp $b->{'date'} }
-           sort { $a->{'channel'} cmp $b->{'channel'} }
-           @filenames;
+    # Return list of array references, oldest first
+    return map { $date_map{$_} }
+           sort
+           keys %date_map;
 }
 
 # Convert binary input in $file_encoding to binary output $term_encoding
