@@ -116,10 +116,8 @@ sub filter_filenames {
     foreach my $channel ( keys %$channel_map ) {
         foreach my $file ( @{ $channel_map->{$channel} } ) {
             # Check syntax of filename
-            if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(\.gz)?$/ ) {
-                my $channel = $1;
-                my $date = $2;
-                my $compressed = $3 ? 1 : 0;
+            if ( $file->relative($log_dir) =~ /^(?:.+)_(\d{8})\.log(?:\.gz)?$/ ) {
+                my $date = $1;
                 my $channel_utf8 = decode($file_encoding, $channel);
                 if ( defined $date_requested ) {
                     next unless $date =~ m/$re_date_req/;
@@ -127,7 +125,6 @@ sub filter_filenames {
                 push @filenames, {
                     'channel'    => $channel,
                     'date'       => $date,
-                    'compressed' => $compressed,
                     'file'       => $file,
                 };
             }
@@ -155,10 +152,10 @@ sub render_log_file {
     my $file = $entry->{'file'};
     my $channel = $entry->{'channel'};
     my $date = $entry->{'date'};
-    my $compressed = $entry->{'compressed'};
     return "" unless -r $file;
     my $fh = $file->openr();
-    if ( $compressed ) {
+    # On-the-fly decompress files if extension is .gz
+    if ( $entry->{'file'} =~ m/\.gz$/ ) {
         $fh = IO::Uncompress::Gunzip->new($fh, AutoClose => 1);
     }
     my @log_lines;
