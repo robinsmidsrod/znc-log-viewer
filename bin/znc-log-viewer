@@ -25,7 +25,7 @@ die(
 ) unless $user and exists $znc_user_map->{$user};
 
 # Find valid channels and their associated log files for user
-my $channel_map = get_channel_map( $znc_user_map->{$user} );
+my $channel_map = get_channel_map( $znc_user_map->{$user}, $channel );
 
 # List valid channels unless param matches
 die(
@@ -38,13 +38,17 @@ die(
   . "\n"
 ) unless $channel;
 
+# Ensure some channels were found
+die("No channels found for search '$channel'.\n")
+    unless scalar keys %$channel_map;
+
 # Show filenames that match channel and date
 say join("\n",
     map { encode($term_encoding, $_) }
     map { $_->{'timestamp'} . " " . $_->{'channel'} . ": " . $_->{'message'} }
     sort { $a->{'timestamp'} cmp $b->{'timestamp'} }
     map { render_log_file($_) }
-    filter_filenames( $znc_user_map->{$user}, $channel, $date )
+    filter_filenames( $znc_user_map->{$user}, $channel_map, $date )
 );
 
 exit;
@@ -67,11 +71,18 @@ sub get_znc_user_map {
     return wantarray ? %znc_user_map : \%znc_user_map;
 }
 
-# Create a map of all valid channels for user based on log dir
+# Create a map of all valid channels for user based on log dir,
+# filter out matching channels, if specified.
 # Key: channel name
 # Value: array of logfiles (unsorted)
 sub get_channel_map {
-    my ($log_dir) = @_;
+    my ($log_dir, $channel_requested) = @_;
+    my $channel_requested_utf8 = defined($channel_requested)
+                               ? decode($term_encoding, $channel_requested)
+                               : undef;
+    my $re_chan_req = defined($channel_requested_utf8)
+                    ? qr/\Q$channel_requested_utf8\E/i
+                    : undef;
     my %channel_map;
     while ( my $file = $log_dir->next() ) {
         next unless -f $file;
@@ -80,6 +91,10 @@ sub get_channel_map {
         if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
             my $channel = $1;
             my $date = $2;
+            if ( defined $channel_requested_utf8 ) {
+                my $channel_utf8 = decode($file_encoding, $channel);
+                next unless $channel_utf8 =~ m/$re_chan_req/;
+            }
             $channel_map{$channel} = [] unless exists $channel_map{$channel};
             push @{ $channel_map{$channel} }, $file;
         }
@@ -90,57 +105,35 @@ sub get_channel_map {
     return wantarray ? %channel_map : \%channel_map;
 }
 
-# Filter valid dates based on log dir and channel name
-sub filter_channel_dates {
-    my ($log_dir, $channel_requested) = @_;
-    my $channel_requested_utf8 = decode($term_encoding, $channel_requested);
-    my %date_map;
-    while ( my $file = $log_dir->next() ) {
-        next unless -f $file;
-        next unless -r $file;
-        # Check syntax of filename
-        if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
-            my $channel = $1;
-            my $date = $2;
-            my $channel_utf8 = decode($file_encoding, $channel);
-            next unless $channel_utf8 =~ qr/\Q$channel_requested_utf8\E/i;
-            $date_map{$date}++;
-        }
-        else {
-            say STDERR "File not matching pattern: $file";
-        }
-    }
-    return sort keys %date_map;
-}
-
-# Filter filenames based on log dir, channel name and date
+# Filter and sort log files based on date
 # Returns array with metadata
 sub filter_filenames {
-    my ($log_dir, $channel_requested, $date_requested) = @_;
-    my $channel_requested_utf8 = decode($term_encoding, $channel_requested);
+    my ($log_dir, $channel_map, $date_requested) = @_;
+    my $re_date_req = defined($date_requested)
+                    ? qr/^\Q$date_requested\E/
+                    : undef;
     my @filenames;
-    while ( my $file = $log_dir->next() ) {
-        next unless -f $file;
-        next unless -r $file;
-        # Check syntax of filename
-        if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(\.gz)?$/ ) {
-            my $channel = $1;
-            my $date = $2;
-            my $compressed = $3 ? 1 : 0;
-            my $channel_utf8 = decode($file_encoding, $channel);
-            next unless $channel_utf8 =~ qr/\Q$channel_requested_utf8\E/i;
-            if ( $date_requested ) {
-                next unless $date =~ qr/^\Q$date_requested\E/;
+    foreach my $channel ( keys %$channel_map ) {
+        foreach my $file ( @{ $channel_map->{$channel} } ) {
+            # Check syntax of filename
+            if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(\.gz)?$/ ) {
+                my $channel = $1;
+                my $date = $2;
+                my $compressed = $3 ? 1 : 0;
+                my $channel_utf8 = decode($file_encoding, $channel);
+                if ( defined $date_requested ) {
+                    next unless $date =~ m/$re_date_req/;
+                }
+                push @filenames, {
+                    'channel'    => $channel,
+                    'date'       => $date,
+                    'compressed' => $compressed,
+                    'file'       => $file,
+                };
             }
-            push @filenames, {
-                'channel'    => $channel,
-                'date'       => $date,
-                'compressed' => $compressed,
-                'file'       => $file,
-            };
-        }
-        else {
-            say STDERR "File not matching pattern: $file";
+            else {
+                say STDERR "File not matching pattern: $file";
+            }
         }
     }
     return sort { $a->{'date'} cmp $b->{'date'} }
