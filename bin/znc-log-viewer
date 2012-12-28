@@ -63,7 +63,7 @@ sub get_znc_user_map {
     my ($znc_user_dir) = @_;
     my %znc_user_map =
         map {
-            "" . $_->relative($znc_user_dir)
+            "" . $_->basename
               =>
             $_->subdir("moddata","log")
         }
@@ -88,7 +88,7 @@ sub get_channel_map {
         next unless -f $file;
         next unless -r _;
         # Check syntax of filename
-        if ( $file->relative($log_dir) =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
+        if ( $file->basename =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
             my $channel = $1;
             my $date = $2;
             if ( defined $channel_requested_utf8 ) {
@@ -108,7 +108,7 @@ sub get_channel_map {
 # Filter and sort log files based on date
 # Returns array with metadata
 sub filter_filenames {
-    my ($log_dir, $channel_map, $date_requested) = @_;
+    my ($channel_map, $date_requested) = @_;
     my $re_date_req = defined($date_requested)
                     ? qr/^\Q$date_requested\E/
                     : undef;
@@ -116,7 +116,7 @@ sub filter_filenames {
     foreach my $channel ( keys %$channel_map ) {
         foreach my $file ( @{ $channel_map->{$channel} } ) {
             # Check syntax of filename
-            if ( $file->relative($log_dir) =~ /^(?:.+)_(\d{8})\.log(?:\.gz)?$/ ) {
+            if ( $file->basename =~ /^(?:.+)_(\d{8})\.log(?:\.gz)?$/ ) {
                 my $date = $1;
                 my $channel_utf8 = decode($file_encoding, $channel);
                 if ( defined $date_requested ) {
@@ -167,7 +167,7 @@ sub render_log_file {
         # Generate proper timestamp from line + date
         my $timestamp = $date;
         if ( $line =~ s/^ \[ (\d{2}) : (\d{2}) : (\d{2}) \] (.*) $/$4/x ) {
-            $timestamp = $date . "-" . $1 . $2 . $3;
+            $timestamp = $date . "-" . "$1$2$3" . "Z";
         }
 
         # Get rid of whitespace at start and end of line
