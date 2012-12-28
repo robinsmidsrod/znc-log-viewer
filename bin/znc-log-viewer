@@ -99,10 +99,12 @@ sub get_channel_map {
         if ( $file->basename =~ /^(.+)_(\d{8})\.log(?:\.gz)?$/ ) {
             my $channel = $1;
             my $date = $2;
+            # Skip unless channel matches specified
             if ( defined $channel_requested_utf8 ) {
                 my $channel_utf8 = decode($file_encoding, $channel);
                 next unless $channel_utf8 =~ m/$re_chan_req/;
             }
+            # Cluster on channel
             $channel_map{$channel} = [] unless exists $channel_map{$channel};
             push @{ $channel_map{$channel} }, $file;
         }
@@ -128,9 +130,11 @@ sub cluster_filenames {
             if ( $file->basename =~ /^(?:.+)_(\d{8})\.log(?:\.gz)?$/ ) {
                 my $date = $1;
                 my $channel_utf8 = decode($file_encoding, $channel);
+                # Skip unless date matches specified
                 if ( defined $date_requested ) {
                     next unless $date =~ m/$re_date_req/;
                 }
+                # Cluster on date
                 $date_map{$date} = [] unless exists $date_map{$date};
                 push @{ $date_map{$date} }, {
                     'channel'    => $channel,
