@@ -73,7 +73,7 @@ sub get_znc_user_map {
         map {
             "" . $_->basename
               =>
-            $_->subdir("moddata","log")
+            $_->subdir("networks", "" . $_->basename, "moddata", "log")
         }
         $znc_user_dir->children();
     return wantarray ? %znc_user_map : \%znc_user_map;
