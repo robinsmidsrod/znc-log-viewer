@@ -1,7 +1,7 @@
 znc-log-viewer
 ==============
 
-A simple Perl script to view your ZNC bouncer IRC logs.
+A simple Perl script to view and search your ZNC bouncer IRC logs.
 
 It expects your logs to be located in
 `~/.znc/users/<username>/moddata/log/<logfile>`.
@@ -19,10 +19,20 @@ FreeNode, I type this:
 
     znc-log-viewer freenode perl6 201201
 
+INSTALLING DEPENDENCIES
+=======================
+
+If you use `cpanm`, then installing the dependencies should be a breeze
+using the included `cpanfile`.
+
+    cpanm --installdeps .
+
 SEE ALSO
 ========
 
 * The ZNC log module - http://wiki.znc.in/Log
+* cpanm - https://github.com/miyagawa/cpanminus
+* cpanfile - https://github.com/miyagawa/cpanfile
 
 LICENSE
 =======
