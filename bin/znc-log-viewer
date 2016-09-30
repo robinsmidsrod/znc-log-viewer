@@ -69,13 +69,18 @@ sub get_znc_user_dir {
 # Create a map of ZNC users and associated log dirs
 sub get_znc_user_map {
     my ($znc_user_dir) = @_;
-    my %znc_user_map =
-        map {
-            "" . $_->basename
-              =>
-            $_->subdir("networks", "" . $_->basename, "moddata", "log")
+    my %znc_user_map;
+    foreach my $user_dir ( $znc_user_dir->children ) {
+        my $user_name = "" . $user_dir->basename;
+        foreach my $network_dir ( $user_dir->subdir("networks")->children ) {
+            my $network_name = "" . $network_dir->basename;
+            my $log_dir = $network_dir->subdir("moddata", "log");
+            my $key = $user_name eq $network_name
+                    ? $user_name
+                    : "$user_name/$network_name";
+            $znc_user_map{ $key } = $log_dir;
         }
-        $znc_user_dir->children();
+    }
     return wantarray ? %znc_user_map : \%znc_user_map;
 }
 
